@@ -148,6 +148,10 @@ sub _apply_all_roles {
             $meta = find_meta( $role->[0] );
         }
 
+        unless (defined $meta) {
+            $meta = _inflate_role( $role->[0] );
+        }
+
         unless ($meta && $meta->isa('Moose::Meta::Role') ) {
             throw_exception( CanOnlyConsumeRole => role_name => $role->[0] );
         }
@@ -523,6 +527,40 @@ sub _is_role_only_subclass {
 sub _is_package_loaded {
     my ($package) = @_;
     defined $INC{module_notional_filename($package)};
+}
+
+sub _inflate_role {
+    my ($package) = @_;
+
+    if (_is_package_loaded('Role::Tiny')
+    and Role::Tiny->can('is_role')
+    and Role::Tiny->is_role($package)) {
+        require Moose::Meta::Role;
+        my $meta = Moose::Meta::Role->initialize($package);
+        my $info = $Role::Tiny::INFO{$package};
+
+        my $methods = Role::Tiny->_concrete_methods_of($package);
+        for my $name (keys %$methods) {
+            $meta->add_method($name, $methods->{$name});
+        }
+
+        $meta->add_required_methods(@{ $info->{requires} || [] });
+
+        for my $modifier (@{ $info->{modifiers} || [] }) {
+            my ($type, @names) = @$modifier;
+            my $code = pop(@names);
+            @names = map { ref($_) ? @$_ : $_ } @names;
+
+            my $adder = "add_" . $modifier->[0] . "_method_modifier";
+            for my $name (@names) {
+                $meta->$adder($name, $code);
+            }
+        }
+
+        return $meta;
+    }
+
+    return;
 }
 
 1;
